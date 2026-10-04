@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diário de Humor</title>
+<style>
+  :root {
+    --paper: #f5f3fa;
+    --surface: #ffffff;
+    --ink: #232b3e;
+    --muted: #6a7184;
+    --line: #e4e1ee;
+    --accent: #5b5bd6;
+    --accent-ink: #ffffff;
+    --soft: #ecebf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16182a;
+      --surface: #20233a;
+      --ink: #eceaf6;
+      --muted: #a2a7bd;
+      --line: #32364f;
+      --accent: #8c8cf0;
+      --accent-ink: #14152a;
+      --soft: #2a2e4a;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink); }
+  body {
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.45;
+    min-height: 100vh;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 110px; }
+  h1 { font-size: 26px; margin: 4px 0 18px; letter-spacing: -0.01em; }
+  h2 { font-size: 18px; margin: 0 0 10px; }
+  .sub { color: var(--muted); font-size: 14px; margin: -6px 0 12px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 16px; }
+  .stack > * + * { margin-top: 22px; }
+
+  /* Humor */
+  .humores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .humor {
+    appearance: none; border: 2px solid transparent; background: var(--soft); color: var(--ink);
+    border-radius: 16px; padding: 12px 2px 8px; font: inherit; cursor: pointer; text-align: center;
+  }
+  .humor .e { font-size: 34px; display: block; line-height: 1.1; }
+  .humor .n { font-size: 11px; display: block; margin-top: 4px; color: var(--muted); }
+  .humor[aria-pressed="true"] { border-color: var(--c); background: color-mix(in srgb, var(--c) 22%, var(--surface)); }
+  .humor[aria-pressed="true"] .n { color: var(--ink); font-weight: 600; }
+
+  /* Sentimentos */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    appearance: none; border: 1px solid var(--line); background: var(--soft); color: var(--ink);
+    border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+
+  textarea, input[type="date"], select {
+    width: 100%; font: inherit; color: var(--ink); background: var(--soft);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  }
+  textarea { min-height: 100px; resize: vertical; }
+  label { display: block; font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+
+  .btn {
+    appearance: none; border: 0; width: 100%; padding: 15px; border-radius: 14px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 700; font-size: 16px;
+  }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn.sec { background: var(--soft); color: var(--ink); font-weight: 600; }
+  .btn.small { width: auto; padding: 8px 14px; font-size: 14px; border-radius: 10px; }
+
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* Histórico */
+  .item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: 0; }
+  .item .big { font-size: 34px; line-height: 1; }
+  .item .body { flex: 1; min-width: 0; }
+  .item .t { font-weight: 700; }
+  .item .d { font-size: 13px; color: var(--muted); }
+  .item .s { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 2px; }
+  .item .c { margin-top: 4px; overflow-wrap: anywhere; }
+  .link { background: none; border: 0; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 0; text-decoration: underline; }
+  .link.danger { color: #d1435b; font-weight: 700; }
+
+  /* Relatório */
+  .linha { display: flex; justify-content: space-between; padding: 6px 0; }
+  .linha b { font-variant-numeric: tabular-nums; }
+  .cols { display: flex; align-items: flex-end; gap: 10px; height: 170px; padding-top: 18px; }
+  .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+  .col .bar { width: 100%; border-radius: 8px 8px 0 0; min-height: 3px; background: var(--c); }
+  .col .v { font-size: 13px; font-weight: 700; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+  .col .em { font-size: 22px; margin-top: 6px; }
+  .hrow { display: grid; grid-template-columns: 96px 1fr 28px; gap: 8px; align-items: center; margin: 7px 0; font-size: 14px; }
+  .hrow .track { background: var(--soft); border-radius: 8px; height: 16px; overflow: hidden; }
+  .hrow .fill { height: 100%; background: var(--accent); border-radius: 8px; }
+  .hrow .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .com { border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: color-mix(in srgb, var(--c) 16%, var(--surface)); overflow-wrap: anywhere; }
+  .com .m { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .grupo-t { font-weight: 700; margin: 18px 0 0; }
+  .vazio { text-align: center; color: var(--muted); padding: 36px 12px; }
+  .aviso { background: #fff4d6; color: #5c4400; border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; }
+  .linha-btns { display: flex; gap: 8px; margin-top: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .add-sent { display: flex; gap: 8px; margin-top: 14px; align-items: stretch; }
+  .add-sent input {
+    flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--soft);
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  }
+  #csvBox { margin-top: 12px; font-size: 12px; min-height: 140px; font-family: ui-monospace, Menlo, monospace; }
+
+  /* Navegação */
+  nav {
+    position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--surface);
+    border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button {
+    flex: 1; appearance: none; background: none; border: 0; color: var(--muted); font: inherit;
+    font-size: 12px; padding: 10px 0 8px; cursor: pointer;
+  }
+  nav button .i { display: block; font-size: 22px; line-height: 1.2; }
+  nav button[aria-current="page"] { color: var(--accent); font-weight: 700; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); background: var(--ink); color: var(--paper);
+    padding: 10px 18px; border-radius: 999px; font-size: 14px; font-weight: 600; opacity: 0; pointer-events: none;
+    transition: opacity .2s;
+  }
+  .toast.on { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+
+  .so-print { display: none; }
+  @media print {
+    :root {
+      --paper: #ffffff; --surface: #ffffff; --ink: #111111; --muted: #555555;
+      --line: #cccccc; --accent: #5b5bd6; --accent-ink: #ffffff; --soft: #eeeeee;
+    }
+    html, body { background: #ffffff; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    nav, .toast, .aviso, .nao-print, h1 { display: none !important; }
+    main { max-width: none; padding: 0; }
+    .so-print { display: block; margin-bottom: 14px; }
+    .card { break-inside: avoid; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main id="conteudo"></main>
+
+<nav aria-label="Seções">
+  <button data-aba="registrar"><span class="i">✚</span>Registrar</button>
+  <button data-aba="historico"><span class="i">☰</span>Histórico</button>
+  <button data-aba="relatorio"><span class="i">▥</span>Relatório</button>
+</nav>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const HUMORES = [
+  { id: 'muitoBem', emoji: '😄', nome: 'Muito bem', cor: '#3fb67a' },
+  { id: 'bem',      emoji: '🙂', nome: 'Bem',       cor: '#6cc7b0' },
+  { id: 'neutro',   emoji: '😐', nome: 'Neutro',    cor: '#f2c14e' },
+  { id: 'mal',      emoji: '🙁', nome: 'Mal',       cor: '#f28c4e' },
+  { id: 'muitoMal', emoji: '😢', nome: 'Muito mal', cor: '#e5566b' }
+];
+const SENTIMENTOS = ['Medo','Ansiedade','Alegria','Tristeza','Raiva','Esperança','Vergonha','Frustração',
+  'Angústia','Confiança','Solidão','Culpa','Insegurança','Gratidão','Desânimo','Entusiasmo'];
+
+const hum = id => HUMORES.find(h => h.id === id) || HUMORES[2];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = iso => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+
+let registros = [];
+let aba = 'registrar';
+let humorSel = null;
+let sentSel = new Set();
+let comentarioRascunho = '';
+let periodo = '7';
+let dataIni = '';
+let dataFim = '';
+let apagandoId = null;
+let csvTexto = '';
+let modoStorage = 'nenhum'; // 'claude' | 'local' | 'nenhum'
+
+async function carregar() {
+  if (window.storage) {
+    try {
+      const r = await window.storage.get('registros');
+      registros = r && r.value ? JSON.parse(r.value) : [];
+      modoStorage = 'claude';
+      return;
+    } catch (e) {
+      // chave ainda inexistente também gera erro: testa se a escrita funciona
+      try {
+        const t = await window.storage.set('teste', '1');
+        if (t) { modoStorage = 'claude'; registros = []; return; }
+      } catch (e2) { /* segue para o próximo método */ }
+    }
+  }
+  try {
+    localStorage.setItem('__teste', '1');
+    localStorage.removeItem('__teste');
+    const v = localStorage.getItem('diario-registros');
+    registros = v ? JSON.parse(v) : [];
+    modoStorage = 'local';
+  } catch (e) { modoStorage = 'nenhum'; }
+}
+
+async function persistir() {
+  const json = JSON.stringify(registros);
+  try {
+    if (modoStorage === 'claude') {
+      const r = await window.storage.set('registros', json);
+      if (!r) throw new Error('falhou');
+    } else if (modoStorage === 'local') {
+      localStorage.setItem('diario-registros', json);
+    } else {
+      toast('Não está salvando neste modo. Use o backup.');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    toast('Não foi possível salvar. Use o backup.');
+    return false;
+  }
+}
+
+let sentimentosExtras = [];
+const todosSentimentos = () => [...SENTIMENTOS, ...sentimentosExtras];
+
+async function carregarExtras() {
+  try {
+    let v = null;
+    if (modoStorage === 'claude') {
+      const r = await window.storage.get('sentimentos-extras');
+      v = r && r.value;
+    } else if (modoStorage === 'local') {
+      v = localStorage.getItem('diario-sentimentos-extras');
+    }
+    sentimentosExtras = v ? JSON.parse(v) : [];
+  } catch (e) { sentimentosExtras = []; }
+}
+
+async function persistirExtras() {
+  const json = JSON.stringify(sentimentosExtras);
+  try {
+    if (modoStorage === 'claude') await window.storage.set('sentimentos-extras', json);
+    else if (modoStorage === 'local') localStorage.setItem('diario-sentimentos-extras', json);
+    else return false;
+    return true;
+  } catch (e) { return false; }
+}
+
+async function adicionarSentimento() {
+  const campo = document.getElementById('novoSent');
+  if (!campo) return;
+  let nome = campo.value.trim().replace(/\s+/g, ' ');
+  if (!nome) return;
+  nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+  const area = document.getElementById('coment');
+  if (area) comentarioRascunho = area.value;
+  const existente = todosSentimentos().find(s => s.toLowerCase() === nome.toLowerCase());
+  if (existente) {
+    sentSel.add(existente);
+    render();
+    toast('Esse sentimento já existe. Marquei para você');
+    return;
+  }
+  sentimentosExtras.push(nome);
+  sentSel.add(nome);
+  await persistirExtras();
+  render();
+  toast('Sentimento adicionado');
+}
+
+let backupTexto = '';
+function statusTexto() {
+  if (modoStorage === 'claude') return 'Os registros ficam salvos neste aparelho, dentro do Claude.';
+  if (modoStorage === 'local') return 'Os registros ficam salvos neste navegador.';
+  return 'Atenção: neste modo os registros não ficam salvos. Gere um backup depois de registrar.';
+}
+
+function cartaoBackup() {
+  return `<div class="card nao-print">
+    <h2>Backup dos dados</h2>
+    <p class="sub">${statusTexto()}</p>
+    <button class="btn sec" id="gerarBackup">Gerar backup (todos os registros)</button>
+    ${backupTexto ? `
+      <textarea id="backupBox" readonly style="margin-top:12px">${esc(backupTexto)}</textarea>
+      <div class="linha-btns"><button class="btn small" id="copiarBackup">Copiar backup</button></div>` : ''}
+    <label for="restaurarBox" style="margin-top:16px">Restaurar: cole aqui um backup</label>
+    <textarea id="restaurarBox" placeholder="Cole o texto do backup"></textarea>
+    <div class="linha-btns"><button class="btn small" id="restaurar">Restaurar registros</button></div>
+  </div>`;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  setTimeout(() => t.classList.remove('on'), 1800);
+}
+
+/* ---------- Filtro de período ---------- */
+function filtrados() {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  let ini = null, fim = null;
+  if (periodo === 'hoje') ini = hoje;
+  else if (periodo === '7')  { ini = new Date(hoje); ini.setDate(ini.getDate() - 6); }
+  else if (periodo === '30') { ini = new Date(hoje); ini.setDate(ini.getDate() - 29); }
+  else if (periodo === 'custom') {
+    if (dataIni) ini = new Date(dataIni + 'T00:00:00');
+    if (dataFim) fim = new Date(dataFim + 'T23:59:59.999');
+  }
+  return registros
+    .filter(r => { const d = new Date(r.data); return (!ini || d >= ini) && (!fim || d <= fim); })
+    .sort((a, b) => new Date(b.data) - new Date(a.data));
+}
+
+/* ---------- Telas ---------- */
+function telaRegistrar() {
+  return `
+  <h1>Como você está?</h1>
+  <div class="stack">
+    <div>
+      <h2>Humor agora</h2>
+      <div class="humores">
+        ${HUMORES.map(h => `
+          <button class="humor" style="--c:${h.cor}" data-humor="${h.id}" aria-pressed="${humorSel === h.id}">
+            <span class="e">${h.emoji}</span><span class="n">${h.nome}</span>
+          </button>`).join('')}
+      </div>
+    </div>
+    <div>
+      <h2>O que você está sentindo?</h2>
+      <p class="sub">Você pode escolher mais de uma opção.</p>
+      <div class="chips">
+        ${todosSentimentos().map(s => `<button class="chip" data-sent="${esc(s)}" aria-pressed="${sentSel.has(s)}">${esc(s)}</button>`).join('')}
+      </div>
+      <div class="add-sent">
+        <input type="text" id="novoSent" maxlength="24" placeholder="Outro sentimento" aria-label="Novo sentimento">
+        <button class="btn sec small" id="addSent">Adicionar</button>
+      </div>
+      ${sentimentosExtras.length ? `
+        <p class="sub" style="margin-top:14px">Seus sentimentos. Toque no ✕ para tirar da lista:</p>
+        <div class="chips">
+          ${sentimentosExtras.map(s => `<button class="chip" data-remsent="${esc(s)}" aria-label="Remover ${esc(s)} da lista">${esc(s)} ✕</button>`).join('')}
+        </div>` : ''}
+    </div>
+    <div>
+      <label for="coment">Comentário (opcional)</label>
+      <textarea id="coment" placeholder="Quer escrever algo sobre este momento?">${esc(comentarioRascunho)}</textarea>
+    </div>
+    <button class="btn" id="salvar" ${humorSel ? '' : 'disabled'}>Salvar registro</button>
+    <p class="sub" style="margin-top:10px">${statusTexto()}</p>
+  </div>`;
+}
+
+function telaHistorico() {
+  if (!registros.length) {
+    return `<h1>Histórico</h1><div class="vazio">Nenhum registro ainda.<br>Faça o primeiro na aba Registrar.</div>`;
+  }
+  const lista = [...registros].sort((a, b) => new Date(b.data) - new Date(a.data));
+  return `<h1>Histórico</h1><div class="card">${lista.map(r => {
+    const h = hum(r.humor);
+    return `<div class="item">
+      <div class="big">${h.emoji}</div>
+      <div class="body">
+        <div class="t">${h.nome}</div>
+        <div class="d">${fmt(r.data)}</div>
+        ${r.sentimentos && r.sentimentos.length ? `<div class="s">${r.sentimentos.map(esc).join(', ')}</div>` : ''}
+        ${r.comentario ? `<div class="c">${esc(r.comentario)}</div>` : ''}
+        ${apagandoId === r.id
+          ? `<button class="link danger" data-apagar="${r.id}">Toque de novo para apagar</button>`
+          : `<button class="link" data-apagar="${r.id}">Apagar</button>`}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function periodoTexto() {
+  const br = s => s ? s.split('-').reverse().join('/') : '';
+  if (periodo === 'hoje') return 'Hoje';
+  if (periodo === '7') return 'Últimos 7 dias';
+  if (periodo === '30') return 'Últimos 30 dias';
+  if (periodo === 'custom') return (dataIni ? br(dataIni) : 'início') + ' a ' + (dataFim ? br(dataFim) : 'hoje');
+  return 'Todo o período';
+}
+
+function cabecalhoPrint() {
+  const agora = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  return `<div class="so-print">
+    <h2 style="font-size:22px;margin:0">Diário de Humor: relatório</h2>
+    <div class="sub" style="margin:4px 0 0">Período: ${periodoTexto()}. Gerado em ${agora}.</div>
+  </div>`;
+}
+
+function gerarPDF() {
+  const tituloOriginal = document.title;
+  document.title = 'relatorio-diario-de-humor-' + new Date().toISOString().slice(0, 10);
+  window.addEventListener('afterprint', () => { document.title = tituloOriginal; }, { once: true });
+  try {
+    window.print();
+  } catch (e) {
+    document.title = tituloOriginal;
+    toast('Não foi possível abrir a impressão');
+  }
+}
+
+function graficoLinha(lista) {
+  const chave = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const rotulo = d => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const datas = lista.map(r => new Date(r.data).getTime());
+  const minD = new Date(Math.min(...datas)); minD.setHours(0, 0, 0, 0);
+  const maxD = new Date(Math.max(...datas)); maxD.setHours(0, 0, 0, 0);
+
+  let ini, fim;
+  if (periodo === 'hoje') { ini = hoje; fim = hoje; }
+  else if (periodo === '7')  { ini = new Date(hoje); ini.setDate(ini.getDate() - 6);  fim = hoje; }
+  else if (periodo === '30') { ini = new Date(hoje); ini.setDate(ini.getDate() - 29); fim = hoje; }
+  else if (periodo === 'custom') {
+    ini = dataIni ? new Date(dataIni + 'T00:00:00') : minD;
+    fim = dataFim ? new Date(dataFim + 'T00:00:00') : maxD;
+  } else { ini = minD; fim = maxD; }
+
+  const dias = [];
+  for (let d = new Date(ini); d <= fim && dias.length < 400; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
+  if (!dias.length) return '<p class="sub">Escolha um intervalo de datas válido.</p>';
+
+  const cont = {};
+  HUMORES.forEach(h => { cont[h.id] = {}; });
+  lista.forEach(r => {
+    const k = chave(new Date(r.data));
+    cont[r.humor][k] = (cont[r.humor][k] || 0) + 1;
+  });
+  const series = HUMORES.map(h => ({ h, vals: dias.map(d => cont[h.id][chave(d)] || 0) }));
+
+  const maxV = Math.max(1, ...series.flatMap(s => s.vals));
+  const passo = Math.max(1, Math.ceil(maxV / 4));
+  const topo = Math.ceil(maxV / passo) * passo;
+
+  const W = 360, H = 230, L = 30, R = 12, T = 12, B = 30;
+  const x = i => dias.length === 1 ? L + (W - L - R) / 2 : L + (W - L - R) * i / (dias.length - 1);
+  const y = v => T + (H - T - B) * (1 - v / topo);
+
+  let grade = '';
+  for (let v = 0; v <= topo; v += passo) {
+    grade += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" style="stroke:var(--line)" stroke-width="1"/>
+      <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" style="fill:var(--muted)">${v}</text>`;
+  }
+
+  const passoX = Math.ceil(dias.length / 6);
+  let eixoX = '';
+  dias.forEach((d, i) => {
+    if (i % passoX === 0) {
+      eixoX += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" style="fill:var(--muted)">${rotulo(d)}</text>`;
+    }
+  });
+
+  // Deslocamento mínimo por humor: evita que duas séries com o mesmo valor
+  // fiquem exatamente uma sobre a outra e uma delas pareça sumir.
+  const linhas = series.map((s, idx) => {
+    const dx = (idx - 2) * 1.5;
+    const dy = (idx - 2) * 1.5;
+    const px = i => (x(i) + dx).toFixed(1);
+    const py = v => (y(v) + dy).toFixed(1);
+    const pontos = s.vals.map((v, i) => `${px(i)},${py(v)}`);
+    const caminho = dias.length > 1
+      ? `<polyline points="${pontos.join(' ')}" fill="none" stroke="${s.h.cor}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
+      : '';
+    // Todo dia com registro ganha um ponto, mesmo em períodos longos.
+    const bolas = s.vals.map((v, i) => {
+      if (v === 0 && dias.length > 31) return '';
+      return `<circle cx="${px(i)}" cy="${py(v)}" r="${v > 0 ? 4 : 2.5}" fill="${s.h.cor}" style="stroke:var(--surface)" stroke-width="1.2"/>`;
+    }).join('');
+    return caminho + bolas;
+  }).join('');
+
+  const legenda = HUMORES.map(h => `
+    <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;margin:4px 12px 0 0">
+      <span style="width:16px;height:4px;border-radius:2px;background:${h.cor};display:inline-block"></span>${h.emoji} ${h.nome}
+    </span>`).join('');
+
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img"
+         aria-label="Gráfico de linhas com a quantidade de registros de cada humor por dia">
+      ${grade}${eixoX}${linhas}
+    </svg>
+    <div style="margin-top:6px">${legenda}</div>`;
+}
+
+function telaRelatorio() {
+  const lista = filtrados();
+  const filtro = `
+    <div class="card nao-print">
+      <label for="periodo">Período</label>
+      <select id="periodo">
+        <option value="hoje" ${periodo === 'hoje' ? 'selected' : ''}>Hoje</option>
+        <option value="7" ${periodo === '7' ? 'selected' : ''}>Últimos 7 dias</option>
+        <option value="30" ${periodo === '30' ? 'selected' : ''}>Últimos 30 dias</option>
+        <option value="tudo" ${periodo === 'tudo' ? 'selected' : ''}>Todo o período</option>
+        <option value="custom" ${periodo === 'custom' ? 'selected' : ''}>Personalizado</option>
+      </select>
+      ${periodo === 'custom' ? `
+        <div class="grid2">
+          <div><label for="di">De</label><input type="date" id="di" value="${dataIni}"></div>
+          <div><label for="df">Até</label><input type="date" id="df" value="${dataFim}"></div>
+        </div>` : ''}
+    </div>`;
+
+  if (!lista.length) {
+    return `<h1>Relatório</h1>${filtro}<div class="vazio">Sem registros neste período.<br>Escolha outro período ou faça um novo registro.</div>${cartaoBackup()}`;
+  }
+
+  const contH = HUMORES.map(h => ({ ...h, total: lista.filter(r => r.humor === h.id).length }));
+  const maxH = Math.max(...contH.map(c => c.total), 1);
+
+  const nomesS = [...new Set(lista.flatMap(r => r.sentimentos || []))];
+  const contS = nomesS
+    .map(s => ({ nome: s, total: lista.filter(r => (r.sentimentos || []).includes(s)).length }))
+    .filter(c => c.total > 0)
+    .sort((a, b) => b.total - a.total);
+  const maxS = Math.max(...contS.map(c => c.total), 1);
+
+  const grupos = HUMORES.map(h => {
+    const cs = lista.filter(r => r.humor === h.id && r.comentario);
+    if (!cs.length) return '';
+    return `<div class="grupo-t">${h.emoji} ${h.nome}</div>` + cs.map(r => `
+      <div class="com" style="--c:${h.cor}">
+        ${esc(r.comentario)}
+        <div class="m">${(r.sentimentos || []).length ? esc(r.sentimentos.join(', ')) + ' — ' : ''}${fmt(r.data)}</div>
+      </div>`).join('');
+  }).join('');
+
+  return `
+  <h1>Relatório</h1>
+  ${filtro}
+  ${cabecalhoPrint()}
+  <div class="card">
+    <h2>${lista.length} ${lista.length === 1 ? 'avaliação' : 'avaliações'}</h2>
+    ${contH.map(c => `<div class="linha"><span>${c.emoji} ${c.nome}</span><b>${c.total}</b></div>`).join('')}
+  </div>
+  <div class="card">
+    <h2>Humores no período</h2>
+    <div class="cols" role="img" aria-label="Gráfico de barras com a quantidade de cada humor">
+      ${contH.map(c => `
+        <div class="col">
+          <span class="v">${c.total}</span>
+          <div class="bar" style="--c:${c.cor};height:${(c.total / maxH) * 100}%"></div>
+          <span class="em">${c.emoji}</span>
+        </div>`).join('')}
+    </div>
+  </div>
+  <div class="card">
+    <h2>Evolução dos humores por dia</h2>
+    ${graficoLinha(lista)}
+  </div>
+  <div class="card">
+    <h2>Sentimentos no período</h2>
+    ${contS.length ? contS.map(c => `
+      <div class="hrow">
+        <span>${c.nome}</span>
+        <div class="track"><div class="fill" style="width:${(c.total / maxS) * 100}%"></div></div>
+        <span class="num">${c.total}</span>
+      </div>`).join('') : `<p class="sub">Nenhum sentimento registrado neste período.</p>`}
+  </div>
+  <div class="card">
+    <h2>Comentários por humor</h2>
+    ${grupos || `<p class="sub">Nenhum comentário neste período.</p>`}
+  </div>
+  <div class="card nao-print">
+    <h2>Exportar dados</h2>
+    <p class="sub">Gere um PDF do relatório ou uma planilha (CSV) com os registros do período escolhido.</p>
+    <button class="btn" id="pdf">Gerar PDF do relatório</button>
+    <button class="btn sec" id="exportar" style="margin-top:10px">Exportar CSV</button>
+    ${csvTexto ? `
+      <textarea id="csvBox" readonly>${esc(csvTexto)}</textarea>
+      <div class="linha-btns">
+        <button class="btn small" id="copiar">Copiar texto</button>
+      </div>` : ''}
+  </div>
+  ${cartaoBackup()}`;
+}
+
+/* ---------- CSV ---------- */
+function gerarCSV(lista) {
+  const campo = s => '"' + String(s).replace(/"/g, '""') + '"';
+  const linhas = ['Data;Hora;Humor;Sentimentos;Comentário'];
+  [...lista].sort((a, b) => new Date(a.data) - new Date(b.data)).forEach(r => {
+    const d = new Date(r.data);
+    linhas.push([
+      d.toLocaleDateString('pt-BR'),
+      d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      hum(r.humor).nome,
+      (r.sentimentos || []).join(', '),
+      r.comentario || ''
+    ].map(campo).join(';'));
+  });
+  return linhas.join('\n');
+}
+
+function baixarCSV(texto) {
+  try {
+    const blob = new Blob(['\uFEFF' + texto], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const hoje = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = `diario-de-humor-${hoje}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } catch (e) { /* o texto abaixo continua disponível para copiar */ }
+}
+
+async function copiarDe(idCaixa, texto) {
+  const box = document.getElementById(idCaixa);
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast('Copiado');
+  } catch (e) {
+    box.focus(); box.select();
+    try { document.execCommand('copy'); toast('Copiado'); }
+    catch (e2) { toast('Selecione o texto e copie'); }
+  }
+}
+
+async function copiarTexto() {
+  const box = document.getElementById('csvBox');
+  try {
+    await navigator.clipboard.writeText(csvTexto);
+    toast('Copiado');
+  } catch (e) {
+    box.focus(); box.select();
+    try { document.execCommand('copy'); toast('Copiado'); }
+    catch (e2) { toast('Selecione o texto e copie'); }
+  }
+}
+
+/* ---------- Render e eventos ---------- */
+function render() {
+  const el = document.getElementById('conteudo');
+  const aviso = modoStorage !== 'nenhum' ? '' :
+    `<div class="aviso">Neste modo os registros não ficam salvos quando você fecha a página. Use o backup, na aba Relatório.</div>`;
+  el.innerHTML = aviso + (aba === 'registrar' ? telaRegistrar() : aba === 'historico' ? telaHistorico() : telaRelatorio());
+  document.querySelectorAll('nav button').forEach(b => {
+    if (b.dataset.aba === aba) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
+}
+
+document.querySelector('nav').addEventListener('click', e => {
+  const b = e.target.closest('button[data-aba]');
+  if (!b) return;
+  const area = document.getElementById('coment');
+  if (area) comentarioRascunho = area.value;
+  aba = b.dataset.aba; apagandoId = null;
+  render(); window.scrollTo(0, 0);
+});
+
+document.getElementById('conteudo').addEventListener('click', async e => {
+  const t = e.target;
+  const h = t.closest('[data-humor]');
+  const s = t.closest('[data-sent]');
+  const ap = t.closest('[data-apagar]');
+
+  if (h) {
+    comentarioRascunho = document.getElementById('coment').value;
+    humorSel = h.dataset.humor; render();
+  } else if (s) {
+    comentarioRascunho = document.getElementById('coment').value;
+    const n = s.dataset.sent;
+    sentSel.has(n) ? sentSel.delete(n) : sentSel.add(n);
+    render();
+  } else if (t.closest('#salvar') && humorSel) {
+    const texto = document.getElementById('coment').value.trim();
+    registros.push({
+      id: Date.now(),
+      data: new Date().toISOString(),
+      humor: humorSel,
+      sentimentos: todosSentimentos().filter(x => sentSel.has(x)),
+      comentario: texto
+    });
+    humorSel = null; sentSel = new Set(); comentarioRascunho = '';
+    const ok = await persistir();
+    render(); window.scrollTo(0, 0);
+    if (ok) toast('Registro salvo');
+  } else if (ap) {
+    const id = Number(ap.dataset.apagar);
+    if (apagandoId === id) {
+      registros = registros.filter(r => r.id !== id);
+      apagandoId = null;
+      await persistir();
+    } else {
+      apagandoId = id;
+    }
+    render();
+  } else if (t.closest('#addSent')) {
+    await adicionarSentimento();
+  } else if (t.closest('[data-remsent]')) {
+    const nome = t.closest('[data-remsent]').dataset.remsent;
+    const area = document.getElementById('coment');
+    if (area) comentarioRascunho = area.value;
+    sentimentosExtras = sentimentosExtras.filter(x => x !== nome);
+    sentSel.delete(nome);
+    await persistirExtras();
+    render();
+  } else if (t.closest('#pdf')) {
+    gerarPDF();
+  } else if (t.closest('#exportar')) {
+    csvTexto = gerarCSV(filtrados());
+    baixarCSV(csvTexto);
+    render();
+  } else if (t.closest('#copiar')) {
+    copiarTexto();
+  } else if (t.closest('#gerarBackup')) {
+    backupTexto = JSON.stringify(registros);
+    render();
+  } else if (t.closest('#copiarBackup')) {
+    copiarDe('backupBox', backupTexto);
+  } else if (t.closest('#restaurar')) {
+    try {
+      const dados = JSON.parse(document.getElementById('restaurarBox').value.trim());
+      if (!Array.isArray(dados)) throw new Error('formato');
+      const ids = new Set(registros.map(r => r.id));
+      dados
+        .filter(r => r && r.id && r.data && r.humor && !ids.has(r.id))
+        .forEach(r => registros.push({
+          id: r.id,
+          data: r.data,
+          humor: r.humor,
+          sentimentos: Array.isArray(r.sentimentos) ? r.sentimentos : [],
+          comentario: r.comentario || ''
+        }));
+      await persistir();
+      render();
+      toast('Backup restaurado');
+    } catch (err) {
+      toast('Backup inválido');
+    }
+  }
+});
+
+document.getElementById('conteudo').addEventListener('change', e => {
+  if (e.target.id === 'periodo') { periodo = e.target.value; csvTexto = ''; render(); }
+  if (e.target.id === 'di') { dataIni = e.target.value; csvTexto = ''; render(); }
+  if (e.target.id === 'df') { dataFim = e.target.value; csvTexto = ''; render(); }
+});
+
+document.getElementById('conteudo').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'novoSent') {
+    e.preventDefault();
+    adicionarSentimento();
+  }
+});
+
+carregar().then(carregarExtras).then(render);
+</script>
+</body>
+</html>
