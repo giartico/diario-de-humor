@@ -94,6 +94,7 @@
   .item .d { font-size: 13px; color: var(--muted); }
   .item .s { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 2px; }
   .item .c { margin-top: 4px; overflow-wrap: anywhere; }
+  .dia { font-weight: 700; font-size: 13px; color: var(--muted); text-transform: capitalize; padding: 14px 0 2px; }
   .link { background: none; border: 0; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 0; text-decoration: underline; }
   .link.danger { color: #d1435b; font-weight: 700; }
 
@@ -188,11 +189,24 @@ let aba = 'registrar';
 let humorSel = null;
 let sentSel = new Set();
 let comentarioRascunho = '';
+let dataHoraSel = null; // null = usar o momento em que o registro for salvo
+let valorPadraoRender = ''; // "agora" no momento em que a tela foi desenhada
+// Ordem sempre pela data e hora escolhidas no formulário (campo "data"), do mais antigo ao mais recente
+const porData = (a, b) => (new Date(a.data) - new Date(b.data)) || ((a.id || 0) - (b.id || 0));
+const ordenar = arr => [...arr].sort(porData);
+
+function localNow() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
 let periodo = '7';
 let dataIni = '';
 let dataFim = '';
 let apagandoId = null;
 let csvTexto = '';
+let pdfUrl = '', pdfNome = '', pdfChave = '';
+const chaveRel = () => [periodo, dataIni, dataFim, registros.length].join('|');
 let modoStorage = 'nenhum'; // 'claude' | 'local' | 'nenhum'
 
 async function carregar() {
@@ -326,7 +340,7 @@ function filtrados() {
   }
   return registros
     .filter(r => { const d = new Date(r.data); return (!ini || d >= ini) && (!fim || d <= fim); })
-    .sort((a, b) => new Date(b.data) - new Date(a.data));
+    .sort(porData);
 }
 
 /* ---------- Telas ---------- */
@@ -363,6 +377,16 @@ function telaRegistrar() {
       <label for="coment">Comentário (opcional)</label>
       <textarea id="coment" placeholder="Quer escrever algo sobre este momento?">${esc(comentarioRascunho)}</textarea>
     </div>
+    <div>
+      <label for="dataHora">Data e hora do registro</label>
+      <div class="add-sent" style="margin-top:0">
+        <input type="datetime-local" id="dataHora" value="${dataHoraSel || valorPadraoRender}" max="${valorPadraoRender}">
+        <button class="btn sec small" id="agoraBtn" ${dataHoraSel ? '' : 'hidden'}>Agora</button>
+      </div>
+      <p class="sub" id="dataDica" style="margin:6px 0 0">${dataHoraSel
+        ? 'Registro retroativo: será salvo com a data e a hora escolhidas.'
+        : 'Se você não mudar, usa o momento em que tocar em Salvar.'}</p>
+    </div>
     <button class="btn" id="salvar" ${humorSel ? '' : 'disabled'}>Salvar registro</button>
     <p class="sub" style="margin-top:10px">${statusTexto()}</p>
   </div>`;
@@ -372,10 +396,15 @@ function telaHistorico() {
   if (!registros.length) {
     return `<h1>Histórico</h1><div class="vazio">Nenhum registro ainda.<br>Faça o primeiro na aba Registrar.</div>`;
   }
-  const lista = [...registros].sort((a, b) => new Date(b.data) - new Date(a.data));
-  return `<h1>Histórico</h1><div class="card">${lista.map(r => {
+  const lista = ordenar(registros);
+  let diaAnterior = '';
+  return `<h1>Histórico</h1>
+    <div class="card">${lista.map(r => {
     const h = hum(r.humor);
-    return `<div class="item">
+    const dia = new Date(r.data).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const cab = dia !== diaAnterior ? `<div class="dia">${dia}</div>` : '';
+    diaAnterior = dia;
+    return cab + `<div class="item">
       <div class="big">${h.emoji}</div>
       <div class="body">
         <div class="t">${h.nome}</div>
@@ -407,7 +436,341 @@ function cabecalhoPrint() {
   </div>`;
 }
 
-function gerarPDF() {
+/* ---------- PDF gerado pelo próprio app (não depende da impressão do navegador) ---------- */
+const LARG_HELV = {
+  ' ': 278, '!': 278, '"': 355, '#': 556, '$': 556, '%': 889, '&': 667, "'": 191, '(': 333, ')': 333,
+  '*': 389, '+': 584, ',': 278, '-': 333, '.': 278, '/': 278, ':': 278, ';': 278, '<': 584, '=': 584,
+  '>': 584, '?': 556, '@': 1015, '[': 278, '\\': 278, ']': 278, '^': 469, '_': 556, '`': 333,
+  '{': 334, '|': 260, '}': 334, '~': 584,
+  A: 667, B: 667, C: 722, D: 722, E: 667, F: 611, G: 778, H: 722, I: 278, J: 500, K: 667, L: 556,
+  M: 833, N: 722, O: 778, P: 667, Q: 778, R: 722, S: 667, T: 611, U: 722, V: 667, W: 944, X: 667,
+  Y: 667, Z: 611,
+  a: 556, b: 556, c: 500, d: 556, e: 556, f: 278, g: 556, h: 556, i: 222, j: 222, k: 500, l: 222,
+  m: 833, n: 556, o: 556, p: 556, q: 556, r: 333, s: 500, t: 278, u: 556, v: 500, w: 722, x: 500,
+  y: 500, z: 500
+};
+for (let d = 0; d <= 9; d++) LARG_HELV[String(d)] = 556;
+
+function pdfLimpa(s) {
+  return String(s)
+    .replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, '-').replace(/\u2026/g, '...')
+    .replace(/[\r\t]/g, ' ')
+    .replace(/[^\n\x20-\x7E\u00A0-\u00FF]/g, '');
+}
+function pdfEsc(s) { return s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)'); }
+function pdfLarg(s, size) {
+  let t = 0;
+  for (const ch of s) {
+    const base = ch.normalize('NFD')[0];
+    t += LARG_HELV[ch] || LARG_HELV[base] || 556;
+  }
+  return t * size / 1000;
+}
+
+function dadosLinha(lista) {
+  const chave = d => d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const datas = lista.map(r => new Date(r.data).getTime());
+  const minD = new Date(Math.min(...datas)); minD.setHours(0, 0, 0, 0);
+  const maxD = new Date(Math.max(...datas)); maxD.setHours(0, 0, 0, 0);
+  let ini, fim;
+  if (periodo === 'hoje') { ini = hoje; fim = hoje; }
+  else if (periodo === '7') { ini = new Date(hoje); ini.setDate(ini.getDate() - 6); fim = hoje; }
+  else if (periodo === '30') { ini = new Date(hoje); ini.setDate(ini.getDate() - 29); fim = hoje; }
+  else if (periodo === 'custom') {
+    ini = dataIni ? new Date(dataIni + 'T00:00:00') : minD;
+    fim = dataFim ? new Date(dataFim + 'T00:00:00') : maxD;
+  } else { ini = minD; fim = maxD; }
+  const dias = [];
+  for (let d = new Date(ini); d <= fim && dias.length < 400; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
+  const cont = {};
+  HUMORES.forEach(h => { cont[h.id] = {}; });
+  lista.forEach(r => {
+    const k = chave(new Date(r.data));
+    cont[r.humor] = cont[r.humor] || {};
+    cont[r.humor][k] = (cont[r.humor][k] || 0) + 1;
+  });
+  const series = HUMORES.map(h => ({ h, vals: dias.map(d => (cont[h.id] || {})[chave(d)] || 0) }));
+  const maxV = Math.max(1, ...series.flatMap(s => s.vals));
+  const passo = Math.max(1, Math.ceil(maxV / 4));
+  return { dias, series, passo, topo: Math.ceil(maxV / passo) * passo };
+}
+
+function construirPDF(lista) {
+  const PW = 595.28, PH = 841.89, M = 40, W = PW - 2 * M;
+  const INK = '#232b3e', MUTED = '#6a7184', LINE = '#d9d6e6';
+  const paginas = [];
+  let ops, y;
+
+  const n2 = v => v.toFixed(2);
+  const cor = hex => {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => (v / 255).toFixed(3)).join(' ');
+  };
+  const Y = yTop => n2(PH - yTop);
+  const novaPagina = () => { ops = []; paginas.push(ops); y = M; };
+  const espaco = h => { if (y + h > PH - M - 16) novaPagina(); };
+
+  const texto = (x, yBase, s, size, cHex, negrito) => {
+    s = pdfLimpa(s).replace(/\n/g, ' ');
+    if (!s) return;
+    ops.push(`BT /${negrito ? 'F2' : 'F1'} ${size} Tf ${cor(cHex)} rg ${n2(x)} ${Y(yBase)} Td (${pdfEsc(s)}) Tj ET`);
+  };
+  const ret = (x, yTop, w, h, cHex) =>
+    ops.push(`${cor(cHex)} rg ${n2(x)} ${n2(PH - yTop - h)} ${n2(w)} ${n2(h)} re f`);
+  const lin = (x1, y1, x2, y2, cHex, lw) =>
+    ops.push(`${cor(cHex)} RG ${lw} w 1 J 1 j ${n2(x1)} ${Y(y1)} m ${n2(x2)} ${Y(y2)} l S`);
+  const poli = (pts, cHex, lw) => {
+    if (pts.length < 2) return;
+    ops.push(`${cor(cHex)} RG ${lw} w 1 J 1 j ` +
+      pts.map((p, i) => `${n2(p[0])} ${Y(p[1])} ${i ? 'l' : 'm'}`).join(' ') + ' S');
+  };
+  const circ = (cx, cyTop, r, cHex) => {
+    const k = 0.5523 * r, cy = PH - cyTop;
+    ops.push(`${cor(cHex)} rg ${n2(cx + r)} ${n2(cy)} m ` +
+      `${n2(cx + r)} ${n2(cy + k)} ${n2(cx + k)} ${n2(cy + r)} ${n2(cx)} ${n2(cy + r)} c ` +
+      `${n2(cx - k)} ${n2(cy + r)} ${n2(cx - r)} ${n2(cy + k)} ${n2(cx - r)} ${n2(cy)} c ` +
+      `${n2(cx - r)} ${n2(cy - k)} ${n2(cx - k)} ${n2(cy - r)} ${n2(cx)} ${n2(cy - r)} c ` +
+      `${n2(cx + k)} ${n2(cy - r)} ${n2(cx + r)} ${n2(cy - k)} ${n2(cx + r)} ${n2(cy)} c f`);
+  };
+  const centro = (cx, yBase, s, size, cHex, negrito) => {
+    s = pdfLimpa(s);
+    texto(cx - pdfLarg(s, size) * (negrito ? 1.06 : 1) / 2, yBase, s, size, cHex, negrito);
+  };
+  const cortar = (s, size, maxW) => {
+    s = pdfLimpa(s);
+    if (pdfLarg(s, size) <= maxW) return s;
+    while (s.length > 1 && pdfLarg(s + '...', size) > maxW) s = s.slice(0, -1);
+    return s + '...';
+  };
+  const quebrar = (s, size, maxW) => {
+    const saida = [];
+    pdfLimpa(s).split('\n').forEach(par => {
+      let atual = '';
+      par.split(' ').forEach(p => {
+        while (pdfLarg(p, size) > maxW && p.length > 1) { // palavra maior que a linha
+          if (atual) { saida.push(atual); atual = ''; }
+          let corte = p.length - 1;
+          while (corte > 1 && pdfLarg(p.slice(0, corte), size) > maxW) corte--;
+          saida.push(p.slice(0, corte));
+          p = p.slice(corte);
+        }
+        const teste = atual ? atual + ' ' + p : p;
+        if (!atual || pdfLarg(teste, size) <= maxW) atual = teste;
+        else { saida.push(atual); atual = p; }
+      });
+      saida.push(atual);
+    });
+    return saida;
+  };
+  const titulo = (s) => { espaco(40); texto(M, y + 14, s, 13, INK, true); y += 24; };
+
+  const cont = HUMORES.map(h => ({ ...h, total: lista.filter(r => r.humor === h.id).length }));
+  const nomesS = [...new Set(lista.flatMap(r => r.sentimentos || []))];
+  const contS = nomesS
+    .map(s => ({ nome: s, total: lista.filter(r => (r.sentimentos || []).includes(s)).length }))
+    .sort((a, b) => b.total - a.total);
+
+  novaPagina();
+
+  // Cabeçalho
+  texto(M, y + 18, 'Diário de Humor: relatório', 20, INK, true); y += 28;
+  const agora = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  texto(M, y + 10, `Período: ${periodoTexto()}. Gerado em ${agora}.`, 10, MUTED); y += 26;
+
+  // Resumo
+  texto(M, y + 14, `${lista.length} ${lista.length === 1 ? 'avaliação' : 'avaliações'}`, 14, INK, true); y += 26;
+  cont.forEach(c => {
+    ret(M, y + 1, 9, 9, c.cor);
+    texto(M + 16, y + 9, c.nome, 11, INK);
+    const t = String(c.total);
+    texto(M + 220 - pdfLarg(t, 11) * 1.06, y + 9, t, 11, INK, true);
+    y += 17;
+  });
+  y += 14;
+
+  // Gráfico de barras: humores
+  espaco(190);
+  titulo('Humores no período');
+  {
+    const alt = 105, topo = y + 14, base = topo + alt;
+    const maxH = Math.max(1, ...cont.map(c => c.total));
+    const slot = W / cont.length, bw = Math.min(54, slot - 16);
+    cont.forEach((c, i) => {
+      const cx = M + slot * i + slot / 2;
+      const h = (c.total / maxH) * alt;
+      ret(cx - bw / 2, base - h, bw, Math.max(h, 1.5), c.cor);
+      centro(cx, base - h - 4, String(c.total), 10, INK, true);
+      centro(cx, base + 14, c.nome, 9, MUTED);
+    });
+    lin(M, base, M + W, base, LINE, 0.8);
+    y = base + 30;
+  }
+
+  // Gráfico de linhas: evolução por dia
+  espaco(260);
+  titulo('Evolução dos humores por dia');
+  {
+    const { dias, series, passo, topo } = dadosLinha(lista);
+    if (!dias.length) {
+      texto(M, y + 10, 'Intervalo de datas inválido.', 10, MUTED); y += 20;
+    } else {
+      const L = M + 26, R = M + W - 8, T = y + 8, B = T + 170;
+      const px = i => dias.length === 1 ? (L + R) / 2 : L + (R - L) * i / (dias.length - 1);
+      const py = v => T + (B - T) * (1 - v / topo);
+      for (let v = 0; v <= topo; v += passo) {
+        lin(L, py(v), R, py(v), LINE, 0.6);
+        texto(L - 6 - pdfLarg(String(v), 8), py(v) + 3, String(v), 8, MUTED);
+      }
+      const passoX = Math.ceil(dias.length / 8);
+      dias.forEach((d, i) => {
+        if (i % passoX === 0) {
+          const r = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+          centro(px(i), B + 14, r, 8, MUTED);
+        }
+      });
+      series.forEach((s, idx) => {
+        const off = (idx - 2) * 1.2;
+        const pts = s.vals.map((v, i) => [px(i) + off, py(v) + off]);
+        if (dias.length > 1) poli(pts, s.h.cor, 1.8);
+        pts.forEach((p, i) => {
+          if (s.vals[i] === 0 && dias.length > 31) return;
+          circ(p[0], p[1], s.vals[i] > 0 ? 3 : 1.8, s.h.cor);
+        });
+      });
+      // legenda
+      let lx = M;
+      const ly = B + 34;
+      HUMORES.forEach(h => {
+        ret(lx, ly - 5, 14, 3.5, h.cor);
+        texto(lx + 19, ly, h.nome, 9, INK);
+        lx += 19 + pdfLarg(h.nome, 9) + 18;
+      });
+      y = ly + 24;
+    }
+  }
+
+  // Sentimentos
+  espaco(60);
+  titulo('Sentimentos no período');
+  if (!contS.length) {
+    texto(M, y + 10, 'Nenhum sentimento registrado neste período.', 10, MUTED); y += 22;
+  } else {
+    const maxS = Math.max(...contS.map(c => c.total));
+    contS.forEach(c => {
+      espaco(20);
+      texto(M, y + 10, cortar(c.nome, 10, 118), 10, INK);
+      const bw = Math.max(3, (c.total / maxS) * 300);
+      ret(M + 128, y + 1, bw, 11, '#5b5bd6');
+      texto(M + 128 + bw + 6, y + 10, String(c.total), 10, INK, true);
+      y += 19;
+    });
+    y += 10;
+  }
+
+  // Comentários por humor
+  espaco(60);
+  titulo('Comentários por humor');
+  let algum = false;
+  HUMORES.forEach(h => {
+    const cs = lista.filter(r => r.humor === h.id && r.comentario);
+    if (!cs.length) return;
+    algum = true;
+    espaco(50);
+    ret(M, y + 2, 10, 10, h.cor);
+    texto(M + 16, y + 11, `${h.nome} (${cs.length})`, 11, INK, true);
+    y += 22;
+    cs.forEach(r => {
+      const linhas = quebrar(r.comentario, 10, W - 18);
+      const meta = fmt(r.data) + ((r.sentimentos || []).length ? ' - ' + r.sentimentos.join(', ') : '');
+      const metaLinhas = quebrar(meta, 8, W - 18);
+      const alt = linhas.length * 13 + metaLinhas.length * 10 + 10;
+      espaco(alt + 6);
+      ret(M, y, 3, alt, h.cor);
+      let yy = y + 11;
+      linhas.forEach(l => { texto(M + 12, yy, l, 10, INK); yy += 13; });
+      yy -= 1;
+      metaLinhas.forEach(l => { texto(M + 12, yy + 3, l, 8, MUTED); yy += 10; });
+      y += alt + 8;
+    });
+    y += 6;
+  });
+  if (!algum) { texto(M, y + 10, 'Nenhum comentário neste período.', 10, MUTED); y += 20; }
+
+  // Rodapé com numeração
+  paginas.forEach((p, i) => {
+    ops = p;
+    texto(M, PH - 24, `Diário de Humor - página ${i + 1} de ${paginas.length}`, 8, MUTED);
+  });
+
+  // Montagem do arquivo PDF
+  let pdf = '%PDF-1.4\n';
+  const offs = [];
+  const obj = (id, corpo) => { offs[id] = pdf.length; pdf += `${id} 0 obj\n${corpo}\nendobj\n`; };
+  const np = paginas.length;
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Kids [${paginas.map((_, i) => `${5 + 2 * i} 0 R`).join(' ')}] /Count ${np} >>`);
+  obj(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  obj(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>');
+  paginas.forEach((p, i) => {
+    const conteudo = p.join('\n');
+    obj(5 + 2 * i, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] ` +
+      `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6 + 2 * i} 0 R >>`);
+    obj(6 + 2 * i, `<< /Length ${conteudo.length} >>\nstream\n${conteudo}\nendstream`);
+  });
+  const xref = pdf.length;
+  const total = 5 + 2 * np;
+  pdf += `xref\n0 ${total}\n0000000000 65535 f \n`;
+  for (let i = 1; i < total; i++) pdf += String(offs[i]).padStart(10, '0') + ' 00000 n \n';
+  pdf += `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+
+  const bytes = new Uint8Array(pdf.length);
+  for (let i = 0; i < pdf.length; i++) bytes[i] = pdf.charCodeAt(i) & 255;
+  return bytes;
+}
+
+async function gerarPDF() {
+  const lista = filtrados();
+  if (!lista.length) { toast('Não há registros neste período'); return; }
+  let bytes;
+  try {
+    bytes = construirPDF(lista);
+  } catch (e) {
+    console.error(e);
+    toast('Não foi possível montar o PDF');
+    return;
+  }
+  const nome = 'relatorio-diario-de-humor-' + new Date().toISOString().slice(0, 10) + '.pdf';
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+
+  // 1) Folha de compartilhar do iPhone (permite "Salvar em Arquivos")
+  try {
+    const arquivo = new File([blob], nome, { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      await navigator.share({ files: [arquivo], title: 'Diário de Humor' });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // a pessoa fechou a folha de compartilhar
+  }
+
+  // 2) Abrir o PDF numa nova aba, onde dá para visualizar e encaminhar
+  if (pdfUrl) URL.revokeObjectURL(pdfUrl);
+  pdfUrl = URL.createObjectURL(blob);
+  pdfNome = nome;
+  pdfChave = chaveRel();
+  let aberta = null;
+  try { aberta = window.open(pdfUrl, '_blank'); } catch (e) { aberta = null; }
+
+  // 3) Se o navegador bloquear, mostra os botões "Abrir PDF" e "Baixar PDF"
+  if (!aberta) {
+    render();
+    toast('Toque em "Abrir PDF" logo abaixo do botão');
+  }
+}
+
+function imprimirRelatorio() {
   const tituloOriginal = document.title;
   document.title = 'relatorio-diario-de-humor-' + new Date().toISOString().slice(0, 10);
   window.addEventListener('afterprint', () => { document.title = tituloOriginal; }, { once: true });
@@ -586,7 +949,15 @@ function telaRelatorio() {
     <h2>Exportar dados</h2>
     <p class="sub">Gere um PDF do relatório ou uma planilha (CSV) com os registros do período escolhido.</p>
     <button class="btn" id="pdf">Gerar PDF do relatório</button>
+    ${pdfUrl && pdfChave === chaveRel() ? `
+      <div class="grid2">
+        <a class="btn sec" style="display:block;text-align:center;text-decoration:none"
+           href="${pdfUrl}" target="_blank" rel="noopener">Abrir PDF</a>
+        <a class="btn sec" style="display:block;text-align:center;text-decoration:none"
+           href="${pdfUrl}" download="${pdfNome}">Baixar PDF</a>
+      </div>` : ''}
     <button class="btn sec" id="exportar" style="margin-top:10px">Exportar CSV</button>
+    <button class="link" id="imprimir" style="margin-top:10px">Se o PDF não abrir, imprimir pelo navegador</button>
     ${csvTexto ? `
       <textarea id="csvBox" readonly>${esc(csvTexto)}</textarea>
       <div class="linha-btns">
@@ -650,7 +1021,20 @@ async function copiarTexto() {
 }
 
 /* ---------- Render e eventos ---------- */
+function atualizarDataHora(campo) {
+  dataHoraSel = campo.value && campo.value !== valorPadraoRender ? campo.value : null;
+  const dica = document.getElementById('dataDica');
+  const agora = document.getElementById('agoraBtn');
+  if (dica) {
+    dica.textContent = dataHoraSel
+      ? 'Registro retroativo: será salvo com a data e a hora escolhidas.'
+      : 'Se você não mudar, usa o momento em que tocar em Salvar.';
+  }
+  if (agora) agora.hidden = !dataHoraSel;
+}
+
 function render() {
+  valorPadraoRender = localNow();
   const el = document.getElementById('conteudo');
   const aviso = modoStorage !== 'nenhum' ? '' :
     `<div class="aviso">Neste modo os registros não ficam salvos quando você fecha a página. Use o backup, na aba Relatório.</div>`;
@@ -685,14 +1069,25 @@ document.getElementById('conteudo').addEventListener('click', async e => {
     render();
   } else if (t.closest('#salvar') && humorSel) {
     const texto = document.getElementById('coment').value.trim();
+    const campoData = document.getElementById('dataHora');
+    const escolhida = dataHoraSel ||
+      (campoData && campoData.value && campoData.value !== valorPadraoRender ? campoData.value : null);
+    let quando = new Date();
+    if (escolhida) {
+      quando = new Date(escolhida);
+      if (isNaN(quando.getTime()) || quando > new Date()) {
+        toast('Escolha uma data e hora que já passaram');
+        return;
+      }
+    }
     registros.push({
       id: Date.now(),
-      data: new Date().toISOString(),
+      data: quando.toISOString(),
       humor: humorSel,
       sentimentos: todosSentimentos().filter(x => sentSel.has(x)),
       comentario: texto
     });
-    humorSel = null; sentSel = new Set(); comentarioRascunho = '';
+    humorSel = null; sentSel = new Set(); comentarioRascunho = ''; dataHoraSel = null;
     const ok = await persistir();
     render(); window.scrollTo(0, 0);
     if (ok) toast('Registro salvo');
@@ -716,8 +1111,15 @@ document.getElementById('conteudo').addEventListener('click', async e => {
     sentSel.delete(nome);
     await persistirExtras();
     render();
+  } else if (t.closest('#agoraBtn')) {
+    const area = document.getElementById('coment');
+    if (area) comentarioRascunho = area.value;
+    dataHoraSel = null;
+    render();
   } else if (t.closest('#pdf')) {
-    gerarPDF();
+    await gerarPDF();
+  } else if (t.closest('#imprimir')) {
+    imprimirRelatorio();
   } else if (t.closest('#exportar')) {
     csvTexto = gerarCSV(filtrados());
     baixarCSV(csvTexto);
@@ -753,9 +1155,14 @@ document.getElementById('conteudo').addEventListener('click', async e => {
 });
 
 document.getElementById('conteudo').addEventListener('change', e => {
+  if (e.target.id === 'dataHora') atualizarDataHora(e.target);
   if (e.target.id === 'periodo') { periodo = e.target.value; csvTexto = ''; render(); }
   if (e.target.id === 'di') { dataIni = e.target.value; csvTexto = ''; render(); }
   if (e.target.id === 'df') { dataFim = e.target.value; csvTexto = ''; render(); }
+});
+
+document.getElementById('conteudo').addEventListener('input', e => {
+  if (e.target.id === 'dataHora') atualizarDataHora(e.target);
 });
 
 document.getElementById('conteudo').addEventListener('keydown', e => {
