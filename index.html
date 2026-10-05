@@ -191,6 +191,23 @@ let sentSel = new Set();
 let comentarioRascunho = '';
 let dataHoraSel = null; // null = usar o momento em que o registro for salvo
 let valorPadraoRender = ''; // "agora" no momento em que a tela foi desenhada
+let editandoId = null;      // id do registro em edição (null = novo registro)
+
+// Converte uma data ISO para o formato do campo datetime-local (hora local)
+function paraLocal(iso) {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+// Sentimentos exibidos como opção: a lista atual + qualquer um já marcado (ex.: de um registro antigo)
+const chipsSentimentos = () => [
+  ...todosSentimentos(),
+  ...[...sentSel].filter(s => !todosSentimentos().includes(s))
+];
+
+function limparFormulario() {
+  editandoId = null; humorSel = null; sentSel = new Set(); comentarioRascunho = ''; dataHoraSel = null;
+}
 // Ordem sempre pela data e hora escolhidas no formulário (campo "data"), do mais antigo ao mais recente
 const porData = (a, b) => (new Date(a.data) - new Date(b.data)) || ((a.id || 0) - (b.id || 0));
 const ordenar = arr => [...arr].sort(porData);
@@ -346,7 +363,7 @@ function filtrados() {
 /* ---------- Telas ---------- */
 function telaRegistrar() {
   return `
-  <h1>Como você está?</h1>
+  <h1>${editandoId ? 'Editar registro' : 'Como você está?'}</h1>
   <div class="stack">
     <div>
       <h2>Humor agora</h2>
@@ -361,7 +378,7 @@ function telaRegistrar() {
       <h2>O que você está sentindo?</h2>
       <p class="sub">Você pode escolher mais de uma opção.</p>
       <div class="chips">
-        ${todosSentimentos().map(s => `<button class="chip" data-sent="${esc(s)}" aria-pressed="${sentSel.has(s)}">${esc(s)}</button>`).join('')}
+        ${chipsSentimentos().map(s => `<button class="chip" data-sent="${esc(s)}" aria-pressed="${sentSel.has(s)}">${esc(s)}</button>`).join('')}
       </div>
       <div class="add-sent">
         <input type="text" id="novoSent" maxlength="24" placeholder="Outro sentimento" aria-label="Novo sentimento">
@@ -387,7 +404,8 @@ function telaRegistrar() {
         ? 'Registro retroativo: será salvo com a data e a hora escolhidas.'
         : 'Se você não mudar, usa o momento em que tocar em Salvar.'}</p>
     </div>
-    <button class="btn" id="salvar" ${humorSel ? '' : 'disabled'}>Salvar registro</button>
+    <button class="btn" id="salvar" ${humorSel ? '' : 'disabled'}>${editandoId ? 'Salvar alterações' : 'Salvar registro'}</button>
+    ${editandoId ? '<button class="btn sec" id="cancelarEdicao" style="margin-top:12px">Cancelar edição</button>' : ''}
     <p class="sub" style="margin-top:10px">${statusTexto()}</p>
   </div>`;
 }
@@ -411,9 +429,12 @@ function telaHistorico() {
         <div class="d">${fmt(r.data)}</div>
         ${r.sentimentos && r.sentimentos.length ? `<div class="s">${r.sentimentos.map(esc).join(', ')}</div>` : ''}
         ${r.comentario ? `<div class="c">${esc(r.comentario)}</div>` : ''}
-        ${apagandoId === r.id
-          ? `<button class="link danger" data-apagar="${r.id}">Toque de novo para apagar</button>`
-          : `<button class="link" data-apagar="${r.id}">Apagar</button>`}
+        <div style="display:flex;gap:18px">
+          <button class="link" data-editar="${r.id}">Editar</button>
+          ${apagandoId === r.id
+            ? `<button class="link danger" data-apagar="${r.id}">Toque de novo para apagar</button>`
+            : `<button class="link" data-apagar="${r.id}">Apagar</button>`}
+        </div>
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -1080,27 +1101,51 @@ document.getElementById('conteudo').addEventListener('click', async e => {
         return;
       }
     }
-    registros.push({
-      id: Date.now(),
+    const dados = {
       data: quando.toISOString(),
       humor: humorSel,
-      sentimentos: todosSentimentos().filter(x => sentSel.has(x)),
+      sentimentos: chipsSentimentos().filter(x => sentSel.has(x)),
       comentario: texto
-    });
-    humorSel = null; sentSel = new Set(); comentarioRascunho = ''; dataHoraSel = null;
+    };
+    const editou = editandoId !== null && registros.some(r => r.id === editandoId);
+    if (editou) {
+      registros = registros.map(r => r.id === editandoId ? { ...r, ...dados } : r);
+    } else {
+      registros.push({ id: Date.now(), ...dados });
+    }
+    limparFormulario();
+    if (editou) aba = 'historico';
     const ok = await persistir();
     render(); window.scrollTo(0, 0);
-    if (ok) toast('Registro salvo');
+    if (ok) toast(editou ? 'Registro atualizado' : 'Registro salvo');
   } else if (ap) {
     const id = Number(ap.dataset.apagar);
     if (apagandoId === id) {
       registros = registros.filter(r => r.id !== id);
+      if (editandoId === id) limparFormulario();
       apagandoId = null;
       await persistir();
     } else {
       apagandoId = id;
     }
     render();
+  } else if (t.closest('[data-editar]')) {
+    const id = Number(t.closest('[data-editar]').dataset.editar);
+    const r = registros.find(x => x.id === id);
+    if (r) {
+      editandoId = r.id;
+      humorSel = r.humor;
+      sentSel = new Set(r.sentimentos || []);
+      comentarioRascunho = r.comentario || '';
+      dataHoraSel = paraLocal(r.data);
+      apagandoId = null;
+      aba = 'registrar';
+      render(); window.scrollTo(0, 0);
+    }
+  } else if (t.closest('#cancelarEdicao')) {
+    limparFormulario();
+    aba = 'historico';
+    render(); window.scrollTo(0, 0);
   } else if (t.closest('#addSent')) {
     await adicionarSentimento();
   } else if (t.closest('[data-remsent]')) {
