@@ -489,8 +489,10 @@ function pdfLarg(s, size) {
   return t * size / 1000;
 }
 
-function dadosLinha(lista) {
-  const chave = d => d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate();
+const NIVEL = { muitoMal: 1, mal: 2, neutro: 3, bem: 4, muitoBem: 5 };
+
+// Dados do gráfico de tendência: cada registro vira um ponto (escala 1 a 5) posicionado pela data e hora
+function dadosTendencia(lista) {
   const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
   const datas = lista.map(r => new Date(r.data).getTime());
   const minD = new Date(Math.min(...datas)); minD.setHours(0, 0, 0, 0);
@@ -505,17 +507,15 @@ function dadosLinha(lista) {
   } else { ini = minD; fim = maxD; }
   const dias = [];
   for (let d = new Date(ini); d <= fim && dias.length < 400; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
-  const cont = {};
-  HUMORES.forEach(h => { cont[h.id] = {}; });
-  lista.forEach(r => {
-    const k = chave(new Date(r.data));
-    cont[r.humor] = cont[r.humor] || {};
-    cont[r.humor][k] = (cont[r.humor][k] || 0) + 1;
-  });
-  const series = HUMORES.map(h => ({ h, vals: dias.map(d => (cont[h.id] || {})[chave(d)] || 0) }));
-  const maxV = Math.max(1, ...series.flatMap(s => s.vals));
-  const passo = Math.max(1, Math.ceil(maxV / 4));
-  return { dias, series, passo, topo: Math.ceil(maxV / passo) * passo };
+  const t0 = dias.length ? dias[0].getTime() : 0;
+  const t1 = dias.length ? dias[dias.length - 1].getTime() + 86400000 : 0;
+  const pontos = [...lista].sort(porData).map(r => ({
+    t: new Date(r.data).getTime(),
+    v: NIVEL[r.humor] || 3,
+    h: hum(r.humor)
+  }));
+  const media = pontos.length ? pontos.reduce((s, p) => s + p.v, 0) / pontos.length : 0;
+  return { dias, t0, t1, pontos, media };
 }
 
 function construirPDF(lista) {
@@ -629,46 +629,45 @@ function construirPDF(lista) {
     y = base + 30;
   }
 
-  // Gráfico de linhas: evolução por dia
-  espaco(260);
-  titulo('Evolução dos humores por dia');
+  // Gráfico de linha: evolução do humor (escala de 1 a 5)
+  espaco(270);
+  titulo('Evolução do humor (escala de 1 a 5)');
   {
-    const { dias, series, passo, topo } = dadosLinha(lista);
+    const { dias, t0, t1, pontos, media } = dadosTendencia(lista);
     if (!dias.length) {
       texto(M, y + 10, 'Intervalo de datas inválido.', 10, MUTED); y += 20;
     } else {
-      const L = M + 26, R = M + W - 8, T = y + 8, B = T + 170;
-      const px = i => dias.length === 1 ? (L + R) / 2 : L + (R - L) * i / (dias.length - 1);
-      const py = v => T + (B - T) * (1 - v / topo);
-      for (let v = 0; v <= topo; v += passo) {
+      const L = M + 78, R = M + W - 10, T = y + 8, B = T + 170;
+      const px = t => L + (R - L) * Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+      const py = v => T + (B - T) * (1 - (v - 1) / 4);
+      for (let v = 1; v <= 5; v++) {
         lin(L, py(v), R, py(v), LINE, 0.6);
-        texto(L - 6 - pdfLarg(String(v), 8), py(v) + 3, String(v), 8, MUTED);
+        const nome = (HUMORES.find(h => NIVEL[h.id] === v) || {}).nome || '';
+        const rot = `${v} - ${nome}`;
+        texto(L - 6 - pdfLarg(rot, 8), py(v) + 3, rot, 8, MUTED);
       }
-      const passoX = Math.ceil(dias.length / 8);
-      dias.forEach((d, i) => {
-        if (i % passoX === 0) {
-          const r = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
-          centro(px(i), B + 14, r, 8, MUTED);
-        }
-      });
-      series.forEach((s, idx) => {
-        const off = (idx - 2) * 1.2;
-        const pts = s.vals.map((v, i) => [px(i) + off, py(v) + off]);
-        if (dias.length > 1) poli(pts, s.h.cor, 1.8);
-        pts.forEach((p, i) => {
-          if (s.vals[i] === 0 && dias.length > 31) return;
-          circ(p[0], p[1], s.vals[i] > 0 ? 3 : 1.8, s.h.cor);
+      if (dias.length === 1) {
+        [0, 6, 12, 18, 24].forEach(h => {
+          const xx = px(t0 + h * 3600000);
+          lin(xx, T, xx, B, LINE, 0.4);
+          centro(xx, B + 14, String(h).padStart(2, '0') + 'h', 8, MUTED);
         });
-      });
-      // legenda
-      let lx = M;
-      const ly = B + 34;
-      HUMORES.forEach(h => {
-        ret(lx, ly - 5, 14, 3.5, h.cor);
-        texto(lx + 19, ly, h.nome, 9, INK);
-        lx += 19 + pdfLarg(h.nome, 9) + 18;
-      });
-      y = ly + 24;
+      } else {
+        const passoX = Math.ceil(dias.length / 8);
+        dias.forEach((d, i) => {
+          if (i % passoX === 0) {
+            const xx = px(d.getTime());
+            lin(xx, T, xx, B, LINE, 0.4);
+            centro(xx, B + 14, String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'), 8, MUTED);
+          }
+        });
+      }
+      const pts = pontos.map(p => [px(p.t), py(p.v)]);
+      if (pts.length > 1) poli(pts, '#5b5bd6', 1.6);
+      pontos.forEach((p, i) => circ(pts[i][0], pts[i][1], 3.2, p.h.cor));
+      const ly = B + 36;
+      texto(M, ly, `Média do período: ${media.toFixed(1).replace('.', ',')} de 5`, 10, INK, true);
+      y = ly + 22;
     }
   }
 
@@ -804,87 +803,60 @@ function imprimirRelatorio() {
 }
 
 function graficoLinha(lista) {
-  const chave = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  const rotulo = d => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
-
-  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
-  const datas = lista.map(r => new Date(r.data).getTime());
-  const minD = new Date(Math.min(...datas)); minD.setHours(0, 0, 0, 0);
-  const maxD = new Date(Math.max(...datas)); maxD.setHours(0, 0, 0, 0);
-
-  let ini, fim;
-  if (periodo === 'hoje') { ini = hoje; fim = hoje; }
-  else if (periodo === '7')  { ini = new Date(hoje); ini.setDate(ini.getDate() - 6);  fim = hoje; }
-  else if (periodo === '30') { ini = new Date(hoje); ini.setDate(ini.getDate() - 29); fim = hoje; }
-  else if (periodo === 'custom') {
-    ini = dataIni ? new Date(dataIni + 'T00:00:00') : minD;
-    fim = dataFim ? new Date(dataFim + 'T00:00:00') : maxD;
-  } else { ini = minD; fim = maxD; }
-
-  const dias = [];
-  for (let d = new Date(ini); d <= fim && dias.length < 400; d.setDate(d.getDate() + 1)) dias.push(new Date(d));
+  const { dias, t0, t1, pontos, media } = dadosTendencia(lista);
   if (!dias.length) return '<p class="sub">Escolha um intervalo de datas válido.</p>';
 
-  const cont = {};
-  HUMORES.forEach(h => { cont[h.id] = {}; });
-  lista.forEach(r => {
-    const k = chave(new Date(r.data));
-    cont[r.humor][k] = (cont[r.humor][k] || 0) + 1;
-  });
-  const series = HUMORES.map(h => ({ h, vals: dias.map(d => cont[h.id][chave(d)] || 0) }));
-
-  const maxV = Math.max(1, ...series.flatMap(s => s.vals));
-  const passo = Math.max(1, Math.ceil(maxV / 4));
-  const topo = Math.ceil(maxV / passo) * passo;
-
-  const W = 360, H = 230, L = 30, R = 12, T = 12, B = 30;
-  const x = i => dias.length === 1 ? L + (W - L - R) / 2 : L + (W - L - R) * i / (dias.length - 1);
-  const y = v => T + (H - T - B) * (1 - v / topo);
+  const W = 360, H = 240, L = 48, R = 14, T = 14, B = 30;
+  const x = t => L + (W - L - R) * Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+  const y = v => T + (H - T - B) * (1 - (v - 1) / 4);
 
   let grade = '';
-  for (let v = 0; v <= topo; v += passo) {
+  for (let v = 1; v <= 5; v++) {
+    const emoji = (HUMORES.find(h => NIVEL[h.id] === v) || {}).emoji || '';
     grade += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" style="stroke:var(--line)" stroke-width="1"/>
-      <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" style="fill:var(--muted)">${v}</text>`;
+      <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--muted)">${v} ${emoji}</text>`;
   }
 
-  const passoX = Math.ceil(dias.length / 6);
   let eixoX = '';
-  dias.forEach((d, i) => {
-    if (i % passoX === 0) {
-      eixoX += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle" font-size="10" style="fill:var(--muted)">${rotulo(d)}</text>`;
-    }
-  });
+  if (dias.length === 1) {
+    [0, 6, 12, 18, 24].forEach(h => {
+      const xx = x(t0 + h * 3600000);
+      eixoX += `<line x1="${xx}" x2="${xx}" y1="${T}" y2="${H - B}" style="stroke:var(--line)" stroke-width="0.5"/>
+        <text x="${xx}" y="${H - 10}" text-anchor="middle" font-size="10" style="fill:var(--muted)">${String(h).padStart(2, '0')}h</text>`;
+    });
+  } else {
+    const passoX = Math.ceil(dias.length / 6);
+    dias.forEach((d, i) => {
+      if (i % passoX === 0) {
+        const xx = x(d.getTime());
+        const r = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+        eixoX += `<line x1="${xx}" x2="${xx}" y1="${T}" y2="${H - B}" style="stroke:var(--line)" stroke-width="0.5"/>
+          <text x="${xx}" y="${H - 10}" text-anchor="middle" font-size="10" style="fill:var(--muted)">${r}</text>`;
+      }
+    });
+  }
 
-  // Deslocamento mínimo por humor: evita que duas séries com o mesmo valor
-  // fiquem exatamente uma sobre a outra e uma delas pareça sumir.
-  const linhas = series.map((s, idx) => {
-    const dx = (idx - 2) * 1.5;
-    const dy = (idx - 2) * 1.5;
-    const px = i => (x(i) + dx).toFixed(1);
-    const py = v => (y(v) + dy).toFixed(1);
-    const pontos = s.vals.map((v, i) => `${px(i)},${py(v)}`);
-    const caminho = dias.length > 1
-      ? `<polyline points="${pontos.join(' ')}" fill="none" stroke="${s.h.cor}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`
-      : '';
-    // Todo dia com registro ganha um ponto, mesmo em períodos longos.
-    const bolas = s.vals.map((v, i) => {
-      if (v === 0 && dias.length > 31) return '';
-      return `<circle cx="${px(i)}" cy="${py(v)}" r="${v > 0 ? 4 : 2.5}" fill="${s.h.cor}" style="stroke:var(--surface)" stroke-width="1.2"/>`;
-    }).join('');
-    return caminho + bolas;
-  }).join('');
+  const raio = pontos.length > 60 ? 3 : 4.5;
+  const linha = pontos.length > 1
+    ? `<polyline points="${pontos.map(p => `${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ')}"
+        fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+    : '';
+  const bolas = pontos.map(p =>
+    `<circle cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${raio}" fill="${p.h.cor}"
+       style="stroke:var(--surface)" stroke-width="1.5"/>`).join('');
 
-  const legenda = HUMORES.map(h => `
-    <span style="display:inline-flex;align-items:center;gap:6px;font-size:13px;margin:4px 12px 0 0">
-      <span style="width:16px;height:4px;border-radius:2px;background:${h.cor};display:inline-block"></span>${h.emoji} ${h.nome}
-    </span>`).join('');
+  const escala = [5, 4, 3, 2, 1].map(v => {
+    const h = HUMORES.find(k => NIVEL[k.id] === v);
+    return `${v} = ${h.emoji} ${h.nome}`;
+  }).join(', ');
 
   return `
     <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img"
-         aria-label="Gráfico de linhas com a quantidade de registros de cada humor por dia">
-      ${grade}${eixoX}${linhas}
+         aria-label="Gráfico de linha com a evolução do humor em uma escala de 1 (muito mal) a 5 (muito bem)">
+      ${grade}${eixoX}${linha}${bolas}
     </svg>
-    <div style="margin-top:6px">${legenda}</div>`;
+    <p style="margin:10px 0 0"><b>Média do período: ${media.toFixed(1).replace('.', ',')}</b> de 5</p>
+    <p class="sub" style="margin:4px 0 0">Escala: ${escala}.</p>`;
 }
 
 function telaRelatorio() {
@@ -950,7 +922,7 @@ function telaRelatorio() {
     </div>
   </div>
   <div class="card">
-    <h2>Evolução dos humores por dia</h2>
+    <h2>Evolução do humor</h2>
     ${graficoLinha(lista)}
   </div>
   <div class="card">
