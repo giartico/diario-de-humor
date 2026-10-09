@@ -68,7 +68,7 @@
   }
   .chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 
-  textarea, input[type="date"], select {
+  textarea, input[type="date"], input[type="password"], select {
     width: 100%; font: inherit; color: var(--ink); background: var(--soft);
     border: 1px solid var(--line); border-radius: 12px; padding: 12px;
   }
@@ -251,6 +251,7 @@ async function carregar() {
 }
 
 async function persistir() {
+  if (backupArquivo) { URL.revokeObjectURL(backupArquivo.url); backupArquivo = null; }
   const json = JSON.stringify(registros);
   try {
     if (modoStorage === 'claude') {
@@ -317,7 +318,115 @@ async function adicionarSentimento() {
   toast('Sentimento adicionado');
 }
 
-let backupTexto = '';
+let backupArquivo = null; // { blob, url, nome, texto } do último backup gerado
+let histAsc = true;      // ordem do Histórico: true = data crescente
+
+const paraB64 = buf => {
+  let s = '';
+  new Uint8Array(buf).forEach(b => { s += String.fromCharCode(b); });
+  return btoa(s);
+};
+const deB64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+
+async function chaveDaSenha(senha, sal, iter) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: sal, iterations: iter, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+// Criptografia AES-256-GCM, com chave derivada da senha (PBKDF2-SHA256)
+async function cifrarBackup(senha) {
+  const iter = 250000;
+  const sal = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const chave = await chaveDaSenha(senha, sal, iter);
+  const claro = JSON.stringify({ registros, sentimentosExtras, geradoEm: new Date().toISOString() });
+  const cifrado = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, chave, new TextEncoder().encode(claro));
+  return JSON.stringify({
+    app: 'diario-de-humor', versao: 1, kdf: 'PBKDF2-SHA256', iter,
+    sal: paraB64(sal), iv: paraB64(iv), dados: paraB64(cifrado)
+  });
+}
+
+async function decifrarBackup(envelope, senha) {
+  if (!envelope || envelope.app !== 'diario-de-humor' || !envelope.dados) throw new Error('formato');
+  const chave = await chaveDaSenha(senha, deB64(envelope.sal), envelope.iter);
+  const claro = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: deB64(envelope.iv) }, chave, deB64(envelope.dados));
+  return JSON.parse(new TextDecoder().decode(claro));
+}
+
+async function gerarBackupCriptografado() {
+  const campo = document.getElementById('senhaBackup');
+  const senha = campo ? campo.value : '';
+  if (senha.length < 6) { toast('Use uma senha com pelo menos 6 caracteres'); return; }
+  if (!(window.crypto && crypto.subtle)) { toast('Este navegador não permite criptografar'); return; }
+  let texto;
+  try { texto = await cifrarBackup(senha); }
+  catch (e) { toast('Não foi possível criptografar o backup'); return; }
+  const nome = 'diario-de-humor-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+  if (backupArquivo) URL.revokeObjectURL(backupArquivo.url);
+  const blob = new Blob([texto], { type: 'application/json' });
+  backupArquivo = { blob, url: URL.createObjectURL(blob), nome, texto };
+  render();
+  toast('Backup criptografado pronto');
+}
+
+async function salvarBackupNoCelular() {
+  if (!backupArquivo) return;
+  try {
+    const arquivo = new File([backupArquivo.blob], backupArquivo.nome, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+      await navigator.share({ files: [arquivo], title: 'Backup do Diário de Humor' });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return;
+  }
+  toast('Use "Baixar arquivo" logo abaixo');
+}
+
+async function restaurarDeTexto(texto, senha) {
+  let dados;
+  try {
+    const conteudo = JSON.parse(String(texto).trim());
+    if (Array.isArray(conteudo)) {
+      dados = { registros: conteudo }; // formato antigo, sem senha
+    } else {
+      if (!senha) { toast('Digite a senha do backup'); return; }
+      if (!(window.crypto && crypto.subtle)) { toast('Este navegador não permite descriptografar'); return; }
+      dados = await decifrarBackup(conteudo, senha);
+    }
+  } catch (e) {
+    toast('Senha incorreta ou arquivo inválido');
+    return;
+  }
+
+  const ids = new Set(registros.map(r => r.id));
+  let novos = 0;
+  (dados.registros || []).forEach(r => {
+    if (r && r.id && r.data && !isNaN(new Date(r.data)) && HUMORES.some(h => h.id === r.humor) && !ids.has(r.id)) {
+      registros.push({
+        id: r.id,
+        data: r.data,
+        humor: r.humor,
+        sentimentos: Array.isArray(r.sentimentos) ? r.sentimentos.map(String) : [],
+        comentario: r.comentario ? String(r.comentario) : ''
+      });
+      ids.add(r.id);
+      novos++;
+    }
+  });
+  (dados.sentimentosExtras || []).forEach(s => {
+    const nome = typeof s === 'string' ? s.trim() : '';
+    if (nome && !todosSentimentos().some(x => x.toLowerCase() === nome.toLowerCase())) sentimentosExtras.push(nome);
+  });
+
+  await persistir();
+  await persistirExtras();
+  render();
+  toast(novos ? `${novos} ${novos === 1 ? 'registro recuperado' : 'registros recuperados'}` : 'Nenhum registro novo: tudo já estava no app');
+}
 function statusTexto() {
   if (modoStorage === 'claude') return 'Os registros ficam salvos neste aparelho, dentro do Claude.';
   if (modoStorage === 'local') return 'Os registros ficam salvos neste navegador.';
@@ -325,16 +434,36 @@ function statusTexto() {
 }
 
 function cartaoBackup() {
+  const pronto = backupArquivo ? `
+    <div style="margin-top:14px;padding:12px;border-radius:12px;background:var(--soft)">
+      <b>Backup pronto</b>
+      <div class="sub" style="margin:2px 0 10px;overflow-wrap:anywhere">${esc(backupArquivo.nome)}</div>
+      <button class="btn" id="salvarBackup">Salvar no celular</button>
+      <a class="btn sec" style="display:block;text-align:center;text-decoration:none;margin-top:10px"
+         href="${backupArquivo.url}" download="${esc(backupArquivo.nome)}">Baixar arquivo</a>
+    </div>` : '';
   return `<div class="card nao-print">
     <h2>Backup dos dados</h2>
     <p class="sub">${statusTexto()}</p>
-    <button class="btn sec" id="gerarBackup">Gerar backup (todos os registros)</button>
-    ${backupTexto ? `
-      <textarea id="backupBox" readonly style="margin-top:12px">${esc(backupTexto)}</textarea>
-      <div class="linha-btns"><button class="btn small" id="copiarBackup">Copiar backup</button></div>` : ''}
-    <label for="restaurarBox" style="margin-top:16px">Restaurar: cole aqui um backup</label>
-    <textarea id="restaurarBox" placeholder="Cole o texto do backup"></textarea>
-    <div class="linha-btns"><button class="btn small" id="restaurar">Restaurar registros</button></div>
+    <label for="senhaBackup">Senha do backup</label>
+    <input type="password" id="senhaBackup" autocomplete="new-password" placeholder="Mínimo de 6 caracteres">
+    <p class="sub" style="margin:6px 0 12px">Anote esta senha. Sem ela não é possível recuperar o backup, e ela não pode ser redefinida.</p>
+    <div class="grid2" style="margin-top:0">
+      <button class="btn" id="gerarBackup">Gerar backup</button>
+      <button class="btn sec" id="recuperar">Recuperar backup</button>
+    </div>
+    <input type="file" id="arquivoBackup" accept=".json,.txt,application/json,text/plain" hidden>
+    ${pronto}
+    <details style="margin-top:16px">
+      <summary style="cursor:pointer;color:var(--muted);font-size:14px">Alternativa em texto, se o arquivo não funcionar</summary>
+      ${backupArquivo ? `
+        <p class="sub" style="margin:10px 0 6px">Este texto também é criptografado.</p>
+        <textarea id="backupBox" readonly>${esc(backupArquivo.texto)}</textarea>
+        <div class="linha-btns"><button class="btn small" id="copiarBackupTexto">Copiar texto do backup</button></div>` : ''}
+      <label for="restaurarBox" style="margin-top:14px">Recuperar a partir de um texto</label>
+      <textarea id="restaurarBox" placeholder="Cole aqui o texto de um backup"></textarea>
+      <div class="linha-btns"><button class="btn small" id="restaurarTexto">Recuperar pelo texto</button></div>
+    </details>
   </div>`;
 }
 
@@ -414,9 +543,10 @@ function telaHistorico() {
   if (!registros.length) {
     return `<h1>Histórico</h1><div class="vazio">Nenhum registro ainda.<br>Faça o primeiro na aba Registrar.</div>`;
   }
-  const lista = ordenar(registros);
+  const lista = histAsc ? ordenar(registros) : ordenar(registros).reverse();
   let diaAnterior = '';
   return `<h1>Histórico</h1>
+    <button class="btn sec small" id="ordemHist" style="margin-bottom:14px">Data: ${histAsc ? 'crescente ↑ (antigos primeiro)' : 'decrescente ↓ (recentes primeiro)'}</button>
     <div class="card">${lista.map(r => {
     const h = hum(r.humor);
     const dia = new Date(r.data).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -1144,34 +1274,36 @@ document.getElementById('conteudo').addEventListener('click', async e => {
   } else if (t.closest('#copiar')) {
     copiarTexto();
   } else if (t.closest('#gerarBackup')) {
-    backupTexto = JSON.stringify(registros);
+    await gerarBackupCriptografado();
+  } else if (t.closest('#salvarBackup')) {
+    await salvarBackupNoCelular();
+  } else if (t.closest('#copiarBackupTexto')) {
+    copiarDe('backupBox', backupArquivo ? backupArquivo.texto : '');
+  } else if (t.closest('#recuperar')) {
+    const senha = (document.getElementById('senhaBackup') || {}).value || '';
+    if (!senha) { toast('Digite a senha do backup antes'); return; }
+    document.getElementById('arquivoBackup').click();
+  } else if (t.closest('#restaurarTexto')) {
+    const senha = (document.getElementById('senhaBackup') || {}).value || '';
+    await restaurarDeTexto(document.getElementById('restaurarBox').value, senha);
+  } else if (t.closest('#ordemHist')) {
+    histAsc = !histAsc;
     render();
-  } else if (t.closest('#copiarBackup')) {
-    copiarDe('backupBox', backupTexto);
-  } else if (t.closest('#restaurar')) {
-    try {
-      const dados = JSON.parse(document.getElementById('restaurarBox').value.trim());
-      if (!Array.isArray(dados)) throw new Error('formato');
-      const ids = new Set(registros.map(r => r.id));
-      dados
-        .filter(r => r && r.id && r.data && r.humor && !ids.has(r.id))
-        .forEach(r => registros.push({
-          id: r.id,
-          data: r.data,
-          humor: r.humor,
-          sentimentos: Array.isArray(r.sentimentos) ? r.sentimentos : [],
-          comentario: r.comentario || ''
-        }));
-      await persistir();
-      render();
-      toast('Backup restaurado');
-    } catch (err) {
-      toast('Backup inválido');
-    }
   }
 });
 
-document.getElementById('conteudo').addEventListener('change', e => {
+document.getElementById('conteudo').addEventListener('change', async e => {
+  if (e.target.id === 'arquivoBackup') {
+    const arquivo = e.target.files && e.target.files[0];
+    const senha = (document.getElementById('senhaBackup') || {}).value || '';
+    if (!arquivo) return;
+    let texto = '';
+    try { texto = await arquivo.text(); }
+    catch (err) { toast('Não foi possível ler o arquivo'); return; }
+    e.target.value = '';
+    await restaurarDeTexto(texto, senha);
+    return;
+  }
   if (e.target.id === 'dataHora') atualizarDataHora(e.target);
   if (e.target.id === 'periodo') { periodo = e.target.value; csvTexto = ''; render(); }
   if (e.target.id === 'di') { dataIni = e.target.value; csvTexto = ''; render(); }
