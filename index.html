@@ -110,9 +110,12 @@
   .hrow .track { background: var(--soft); border-radius: 8px; height: 16px; overflow: hidden; }
   .hrow .fill { height: 100%; background: var(--accent); border-radius: 8px; }
   .hrow .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .com { border-radius: 12px; padding: 10px 12px; margin-top: 8px; background: color-mix(in srgb, var(--c) 16%, var(--surface)); overflow-wrap: anywhere; }
-  .com .m { font-size: 12px; color: var(--muted); margin-top: 3px; }
-  .grupo-t { font-weight: 700; margin: 18px 0 0; }
+  .com { border-radius: 4px 12px 12px 4px; border-left: 4px solid var(--c); padding: 10px 12px; margin-top: 10px; background: color-mix(in srgb, var(--c) 12%, var(--surface)); overflow-wrap: anywhere; }
+  .com .topo { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .com .topo .em { font-size: 22px; line-height: 1; }
+  .com .topo b { font-size: 14px; }
+  .com .topo .d { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .com .m { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .vazio { text-align: center; color: var(--muted); padding: 36px 12px; }
   .aviso { background: #fff4d6; color: #5c4400; border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; }
   .linha-btns { display: flex; gap: 8px; margin-top: 12px; }
@@ -716,6 +719,21 @@ function construirPDF(lista) {
     return saida;
   };
   const titulo = (s) => { espaco(40); texto(M, y + 14, s, 13, INK, true); y += 24; };
+  // Carinha do humor desenhada com vetores (o PDF não tem fonte de emoji)
+  const CURVA_BOCA = { muitoBem: 0.38, bem: 0.22, neutro: 0, mal: -0.22, muitoMal: -0.38 };
+  const rosto = (cx, cyTop, r, humor) => {
+    const c = CURVA_BOCA[humor.id] || 0;
+    circ(cx, cyTop, r, humor.cor);
+    circ(cx - r * 0.36, cyTop - r * 0.2, r * 0.13, INK);
+    circ(cx + r * 0.36, cyTop - r * 0.2, r * 0.13, INK);
+    const yBase = cyTop + r * (c < 0 ? 0.5 : 0.28);
+    const pts = [];
+    for (let i = 0; i <= 8; i++) {
+      const t = -1 + i / 4;
+      pts.push([cx + t * r * 0.5, yBase + c * r * (1 - t * t)]);
+    }
+    poli(pts, INK, 0.9);
+  };
 
   const cont = HUMORES.map(h => ({ ...h, total: lista.filter(r => r.humor === h.id).length }));
   const nomesS = [...new Set(lista.flatMap(r => r.sentimentos || []))];
@@ -819,34 +837,29 @@ function construirPDF(lista) {
     y += 10;
   }
 
-  // Comentários por humor
+  // Comentários em ordem de data, cada um com a carinha do humor e a linha vertical colorida
   espaco(60);
-  titulo('Comentários por humor');
-  let algum = false;
-  HUMORES.forEach(h => {
-    const cs = lista.filter(r => r.humor === h.id && r.comentario);
-    if (!cs.length) return;
-    algum = true;
-    espaco(50);
-    ret(M, y + 2, 10, 10, h.cor);
-    texto(M + 16, y + 11, `${h.nome} (${cs.length})`, 11, INK, true);
-    y += 22;
-    cs.forEach(r => {
-      const linhas = quebrar(r.comentario, 10, W - 18);
-      const meta = fmt(r.data) + ((r.sentimentos || []).length ? ' - ' + r.sentimentos.join(', ') : '');
-      const metaLinhas = quebrar(meta, 8, W - 18);
-      const alt = linhas.length * 13 + metaLinhas.length * 10 + 10;
-      espaco(alt + 6);
-      ret(M, y, 3, alt, h.cor);
-      let yy = y + 11;
-      linhas.forEach(l => { texto(M + 12, yy, l, 10, INK); yy += 13; });
-      yy -= 1;
-      metaLinhas.forEach(l => { texto(M + 12, yy + 3, l, 8, MUTED); yy += 10; });
-      y += alt + 8;
-    });
-    y += 6;
+  titulo('Comentários');
+  const comentarios = lista.filter(r => r.comentario);
+  if (!comentarios.length) {
+    texto(M, y + 10, 'Nenhum comentário neste período.', 10, MUTED); y += 20;
+  }
+  comentarios.forEach(r => {
+    const h = HUMORES.find(k => k.id === r.humor) || HUMORES[2];
+    const linhas = quebrar(r.comentario, 10, W - 18);
+    const sents = (r.sentimentos || []).length ? quebrar('Sentimentos: ' + r.sentimentos.join(', '), 8, W - 18) : [];
+    const alt = 17 + linhas.length * 13 + sents.length * 10 + 6;
+    espaco(alt + 8);
+    ret(M, y, 3, alt, h.cor);
+    rosto(M + 17, y + 7.5, 5.5, h);
+    texto(M + 27, y + 11, h.nome, 10, INK, true);
+    texto(M + 27 + pdfLarg(h.nome, 10) * 1.06 + 8, y + 11, fmt(r.data), 8, MUTED);
+    let yy = y + 26;
+    linhas.forEach(l => { texto(M + 12, yy, l, 10, INK); yy += 13; });
+    let ys = yy - 2;
+    sents.forEach(l => { texto(M + 12, ys, l, 8, MUTED); ys += 10; });
+    y += alt + 8;
   });
-  if (!algum) { texto(M, y + 10, 'Nenhum comentário neste período.', 10, MUTED); y += 20; }
 
   // Rodapé com numeração
   paginas.forEach((p, i) => {
@@ -1022,14 +1035,15 @@ function telaRelatorio() {
     .sort((a, b) => b.total - a.total);
   const maxS = Math.max(...contS.map(c => c.total), 1);
 
-  const grupos = HUMORES.map(h => {
-    const cs = lista.filter(r => r.humor === h.id && r.comentario);
-    if (!cs.length) return '';
-    return `<div class="grupo-t">${h.emoji} ${h.nome}</div>` + cs.map(r => `
+  // Comentários em uma lista única, em ordem de data (a lista já vem ordenada por data)
+  const grupos = lista.filter(r => r.comentario).map(r => {
+    const h = hum(r.humor);
+    return `
       <div class="com" style="--c:${h.cor}">
-        ${esc(r.comentario)}
-        <div class="m">${(r.sentimentos || []).length ? esc(r.sentimentos.join(', ')) + ' — ' : ''}${fmt(r.data)}</div>
-      </div>`).join('');
+        <div class="topo"><span class="em">${h.emoji}</span><b>${h.nome}</b><span class="d">${fmt(r.data)}</span></div>
+        <div>${esc(r.comentario)}</div>
+        ${(r.sentimentos || []).length ? `<div class="m">${esc(r.sentimentos.join(', '))}</div>` : ''}
+      </div>`;
   }).join('');
 
   return `
@@ -1065,7 +1079,7 @@ function telaRelatorio() {
       </div>`).join('') : `<p class="sub">Nenhum sentimento registrado neste período.</p>`}
   </div>
   <div class="card">
-    <h2>Comentários por humor</h2>
+    <h2>Comentários</h2>
     ${grupos || `<p class="sub">Nenhum comentário neste período.</p>`}
   </div>
   <div class="card nao-print">
